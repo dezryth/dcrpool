@@ -53,43 +53,36 @@
                 <div class="carousel-cell">
                     <div class="row m-0 h-100">
                         <div class="col-lg-4 col-12 main-carousel__image-container text-center">
-                            <div class="carousel-image" style="background-image:url('/assets/images/carousel_1.svg');">
+                            <div class="carousel-image" style="background-image:url('/assets/images/gpu.svg');">
                             </div>
                         </div>
                         <div class="carousel-text col-lg-8 col-12 px-4">
-                            <h2>Identify the Miner</h2>
-                            <p>The pool currently supports the miners below:
-                            </p>
-                            <div class="d-flex flex-row">
-                                <ul>
-                                    <li>
-                                        Coming Soon!
-                                    </li>
-                                </ul>
-                            </div>
+                          <h2>Ready to Mine? Decred is GPU Mineable!</h2>
+                          <ul>
+                            <li>
+                              <span style="color:red"> Hold up! BLAKE3DCR Pool is not ready for users quite yet. You can follow the below steps to be prepared for when it is. Check back soon!</span>
+                            </li>
+
+                            <li>
+                              Get and build the latest version of <a href="https://github.com/decred/gominer">Gominer</a>
+                            </li>
+
+                            <li>Follow directions to build from source code. Make sure you're using the latest version. Help can be found <a href="https://chat.decred.org/#/room/#pow-mining:decred.org">here.</a></li>
+
+                            <li>Run gominer.exe with the following command within its directory like below:
+                            </br>
+                              <code><font size="1">gominer.exe -o stratum+tcp://{{.Address}}:{{.MinerPort}} -m MININGREWARDSADDRESS.UNIQUENAMEOFYOURCHOICE</font></code>
+                            </li>
+
+                            <!-- <li>Running something other than gominer? As long as the mining software implements the stratum standard, your mining software may be compatible.</li> -->
+                          </ul>
                         </div>
                     </div>
                 </div>
                 <div class="carousel-cell">
                     <div class="row m-0 h-100">
                         <div class="col-lg-4 col-12 main-carousel__image-container text-center">
-                            <div class="carousel-image" style="background-image:url('/assets/images/carousel_2.svg');">
-                            </div>
-                        </div>
-                        <div class="carousel-text col-lg-8 col-12 px-4">
-                            <h2>Connect the Miner</h2>
-                            <p>To connect, set the pool URL to <span class="config">'{{.Address}}'</span>, and the miner
-                                port to <span class="config">{{.MinerPort}}</span></p>
-                            <p>The username of the miner should be the payment address for receiving rewards and a
-                                unique name identifying the client, formatted as <span
-                                    class="config">'address.name'</span></p>
-                        </div>
-                    </div>
-                </div>
-                <div class="carousel-cell">
-                    <div class="row m-0 h-100">
-                        <div class="col-lg-4 col-12 main-carousel__image-container text-center">
-                            <div class="carousel-image" style="background-image:url('/assets/images/carousel_3.svg');">
+                            <div class="carousel-image" style="background-image:url('/assets/images/gpu.svg');">
                             </div>
                         </div>
                         <div class="carousel-text col-lg-8 col-12 px-4">
