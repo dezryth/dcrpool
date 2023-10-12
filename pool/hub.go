@@ -198,7 +198,6 @@ type Hub struct {
 	connections    map[string]uint32
 	connectionsMtx sync.RWMutex
 	endpoint       *Endpoint
-	blake256Pad    []byte
 	cacheCh        chan CacheUpdateEvent
 }
 
@@ -216,17 +215,6 @@ func (h *Hub) FetchCacheChannel() chan CacheUpdateEvent {
 	return h.cacheCh
 }
 
-// generateBlake256Pad creates the extra padding needed for work
-// submissions over the getwork RPC.
-func generateBlake256Pad() []byte {
-	blake256Pad := make([]byte, getworkDataLen-wire.MaxBlockHeaderPayload)
-	blake256Pad[0] = 0x80
-	blake256Pad[len(blake256Pad)-9] |= 0x01
-	binary.BigEndian.PutUint64(blake256Pad[len(blake256Pad)-8:],
-		wire.MaxBlockHeaderPayload*8)
-	return blake256Pad
-}
-
 // NewHub initializes the mining pool hub.
 func NewHub(hcfg *HubConfig) (*Hub, error) {
 	h := &Hub{
@@ -235,7 +223,6 @@ func NewHub(hcfg *HubConfig) (*Hub, error) {
 		connections: make(map[string]uint32),
 		cacheCh:     make(chan CacheUpdateEvent, bufferSize),
 	}
-	h.blake256Pad = generateBlake256Pad()
 	powLimit := new(big.Rat).SetInt(h.cfg.ActiveNet.PowLimit)
 	maxGenTime := h.cfg.MaxGenTime
 	if h.cfg.SoloPool {
@@ -317,7 +304,6 @@ func NewHub(hcfg *HubConfig) (*Hub, error) {
 		ActiveNet:             h.cfg.ActiveNet,
 		db:                    h.cfg.DB,
 		SoloPool:              h.cfg.SoloPool,
-		Blake256Pad:           h.blake256Pad,
 		NonceIterations:       h.cfg.NonceIterations,
 		MaxConnectionsPerHost: h.cfg.MaxConnectionsPerHost,
 		FetchMinerDifficulty:  h.poolDiffs.fetchMinerDifficulty,
@@ -543,18 +529,17 @@ func (h *Hub) processWork(headerE string) {
 
 	blockVersion := headerE[:8]
 	prevBlock := headerE[8:72]
-	genTx1 := headerE[72:288]
+	genTx1 := headerE[72:360]
 	nBits := headerE[232:240]
 	nTime := headerE[272:280]
-	genTx2 := headerE[352:360]
 	job := NewJob(headerE, height)
 	err = h.cfg.DB.persistJob(job)
 	if err != nil {
 		log.Error(err)
 		return
 	}
-	workNotif := WorkNotification(job.UUID, prevBlock, genTx1, genTx2,
-		blockVersion, nBits, nTime, true)
+	workNotif := WorkNotification(job.UUID, prevBlock, genTx1, blockVersion,
+		nBits, nTime, true)
 	h.endpoint.clientsMtx.Lock()
 	for _, client := range h.endpoint.clients {
 		client.sendMessage(workNotif)

@@ -31,7 +31,6 @@ var (
 
 	powLimit    = chaincfg.SimNetParams().PowLimit
 	iterations  = math.Pow(2, float64(256-powLimit.BitLen()))
-	blake256Pad = generateBlake256Pad()
 	maxGenTime  = time.Millisecond * 500
 	cTimeout    = time.Millisecond * 2000
 	hashCalcMax = time.Millisecond * 1500
@@ -39,7 +38,6 @@ var (
 		new(big.Rat).SetInt(powLimit), maxGenTime)
 	config = &ClientConfig{
 		ActiveNet:       chaincfg.SimNetParams(),
-		Blake256Pad:     blake256Pad,
 		NonceIterations: iterations,
 		MaxGenTime:      maxGenTime,
 		FetchMinerDifficulty: func(miner string) (*DifficultyInfo, error) {
@@ -440,14 +438,13 @@ func testClientMessageHandling(t *testing.T) {
 
 	blockVersion := workE[:8]
 	prevBlock := workE[8:72]
-	genTx1 := workE[72:288]
+	genTx1 := workE[72:360]
 	nBits := workE[232:240]
 	nTime := workE[272:280]
-	genTx2 := workE[352:360]
 
 	// Send a work notification to the CPU client.
-	r = WorkNotification(job.UUID, prevBlock, genTx1, genTx2,
-		blockVersion, nBits, nTime, true)
+	r = WorkNotification(job.UUID, prevBlock, genTx1, blockVersion, nBits,
+		nTime, true)
 	select {
 	case <-client.ctx.Done():
 		t.Fatalf("client context done: %v", err)
