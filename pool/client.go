@@ -76,9 +76,6 @@ type ClientConfig struct {
 	db Database
 	// SoloPool represents the solo pool mining mode.
 	SoloPool bool
-	// Blake256Pad represents the extra padding needed for work
-	// submissions over the getwork RPC.
-	Blake256Pad []byte
 	// NonceIterations returns the possible header nonce iterations.
 	NonceIterations float64
 	// FetchMinerDifficulty returns the difficulty information for the
@@ -541,7 +538,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 	// less than the pool target for the client.
 	if hashTarget.Cmp(tgt) > 0 {
 		err := fmt.Errorf("submitted work %s from %s is not less than its "+
-			"corresponding pool target", hash.String(), id)
+			"corresponding pool target", hash, id)
 		sErr := NewStratumError(LowDifficultyShare, err)
 		resp := SubmitWorkResponse(*req.ID, false, sErr)
 		c.sendMessage(resp)
@@ -573,8 +570,8 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		resp := SubmitWorkResponse(*req.ID, true, nil)
 		c.sendMessage(resp)
 
-		desc := fmt.Sprintf("submitted work %s from %s is not "+
-			"less than the network target difficulty", hash.String(), id)
+		desc := fmt.Sprintf("submitted work %s from %s is not less than the "+
+			"network target difficulty", hash, id)
 		return errs.PoolError(errs.NetworkDifficulty, desc)
 	}
 
@@ -588,8 +585,6 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 	}
 	submissionB := make([]byte, getworkDataLen)
 	copy(submissionB[:wire.MaxBlockHeaderPayload], headerB)
-	copy(submissionB[wire.MaxBlockHeaderPayload:],
-		c.cfg.Blake256Pad)
 	submission := hex.EncodeToString(submissionB)
 	accepted, err := c.cfg.SubmitWork(ctx, submission)
 	if err != nil {
@@ -603,8 +598,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		resp := SubmitWorkResponse(*req.ID, false, nil)
 		c.sendMessage(resp)
 
-		desc := fmt.Sprintf("%s: work %s rejected by the network",
-			id, hash.String())
+		desc := fmt.Sprintf("%s: work %s rejected by the network", id, hash)
 		if err != nil {
 			// send the current work if the error is a block difficulty mismatch.
 			if strings.Contains(err.Error(), "block difficulty of") {
@@ -612,7 +606,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 			}
 
 			desc = fmt.Sprintf("%s: work %s rejected by the network (%v)",
-				id, hash.String(), err)
+				id, hash, err)
 		}
 
 		return errs.PoolError(errs.WorkRejected, desc)
@@ -637,7 +631,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		c.sendMessage(resp)
 		return err
 	}
-	log.Tracef("Work %s accepted by the network", hash.String())
+	log.Tracef("Work %s accepted by the network", hash)
 	resp := SubmitWorkResponse(*req.ID, true, nil)
 	c.sendMessage(resp)
 	return nil
@@ -759,10 +753,9 @@ func (c *Client) updateWork(cleanJob bool) {
 	updatedWorkE := buf.String()
 	blockVersion := updatedWorkE[:8]
 	prevBlock := updatedWorkE[8:72]
-	genTx1 := updatedWorkE[72:288]
+	genTx1 := updatedWorkE[72:360]
 	nBits := updatedWorkE[232:240]
 	nTime := updatedWorkE[272:280]
-	genTx2 := updatedWorkE[352:360]
 
 	heightD, err := hex.DecodeString(updatedWorkE[256:264])
 	if err != nil {
@@ -779,8 +772,8 @@ func (c *Client) updateWork(cleanJob bool) {
 		log.Error(err)
 		return
 	}
-	workNotif := WorkNotification(job.UUID, prevBlock, genTx1, genTx2,
-		blockVersion, nBits, nTime, cleanJob)
+	workNotif := WorkNotification(job.UUID, prevBlock, genTx1, blockVersion,
+		nBits, nTime, cleanJob)
 
 	c.sendMessage(workNotif)
 	log.Tracef("Sent a timestamp-rolled current work at "+
@@ -880,9 +873,13 @@ func (c *Client) process() {
 	}
 }
 
-// handleCPUWork prepares work for the cpu miner.
-func (c *Client) handleCPUWork(req *Request) {
-	const miner = "CPU"
+// sendWorkDefault prepares and sends work for miners that do not require
+// any manipulation of the parameters.
+//
+// Since the stratum protocol is not well defined, some miners might require the
+// parameters with different endianness and thus require special handling to
+// manipulate the parameters accordingly.
+func (c *Client) sendWorkDefault(req *Request, miner string) {
 	err := c.encoder.Encode(req)
 	if err != nil {
 		log.Errorf("%s: work encoding error: %v", miner, err)
@@ -1060,7 +1057,7 @@ func (c *Client) send() {
 
 					switch miner {
 					case CPU, NiceHashValidator:
-						c.handleCPUWork(req)
+						c.sendWorkDefault(req, miner)
 						log.Tracef("%s notified of new work", id)
 
 					default:
