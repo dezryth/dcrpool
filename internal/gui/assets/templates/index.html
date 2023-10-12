@@ -59,9 +59,9 @@
                         <div class="carousel-text col-lg-8 col-12 px-4">
                           <h2>Ready to Mine? Decred is GPU Mineable!</h2>
                           <ul>
-                            <li>
+                            <!-- <li>
                               <span style="color:red"> Hold up! BLAKE3DCR Pool is not ready for users quite yet. You can follow the below steps to be prepared for when it is. Check back soon!</span>
-                            </li>
+                            </li> -->
 
                             <li>
                               Get and build the latest version of <a href="https://github.com/decred/gominer">Gominer</a>
@@ -71,7 +71,8 @@
 
                             <li>Run gominer.exe with the following command within its directory like below:
                             </br>
-                              <code><font size="1">gominer.exe -o stratum+tcp://{{.Address}}:{{.MinerPort}} -m MININGREWARDSADDRESS.UNIQUENAMEOFYOURCHOICE</font></code>
+                            gominer --pool stratum+tcp://127.0.0.1:5550 --pooluser=<redacted></redacted>
+                              <code><font size="1">gominer.exe --pool stratum+tcp://{{.Address}}:{{.MinerPort}} --pooluser MININGREWARDSADDRESS.UNIQUENAMEOFYOURCHOICE</font></code>
                             </li>
 
                             <!-- <li>Running something other than gominer? As long as the mining software implements the stratum standard, your mining software may be compatible.</li> -->
