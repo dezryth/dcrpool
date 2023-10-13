@@ -64,16 +64,9 @@ var (
 		MaxUpgradeTries: 5,
 		RollWorkCycle:   rollWorkCycle,
 	}
-	userAgent = func(miner, version string) string {
-		return fmt.Sprintf("%s/%s", miner, version)
-	}
 )
 
-func splitMinerID(id string) (string, string) {
-	const separator = "/"
-	split := strings.Split(id, separator)
-	return split[0], split[1]
-}
+const cpuUserAgent = "cpuminer/1.0.0"
 
 func setCurrentWork(work string) {
 	currentWorkMtx.Lock()
@@ -380,8 +373,7 @@ func testClientMessageHandling(t *testing.T) {
 	}
 
 	id++
-	cpu, cpuVersion := splitMinerID(cpuID)
-	r = SubscribeRequest(&id, userAgent(cpu, cpuVersion), "")
+	r = SubscribeRequest(&id, cpuUserAgent, "")
 	err = sE.Encode(r)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -424,17 +416,25 @@ func testClientMessageHandling(t *testing.T) {
 		t.Fatalf("expected a subscribed mining client")
 	}
 
-	const workE = "07000000022b580ca96146e9c85fa1ee2ec02e0e2579af4e3881fc619e" +
-		"c52d64d83e0000bd646e312ff574bc90e08ed91f1d99a85b318cb4464f2a24f9ad2b" +
-		"f3b9881c2bc9c344adde75e89b14b627acce606e6d652915bdb71dcf5351e8ad6128" +
-		"faab9e010000000000000000000000000000003e133920204e000000000000290000" +
-		"00a6030000954cee5d00000000000000000000000000000000000000000000000000" +
-		"0000000000000000000000000000008000000100000000000005a0"
+	const (
+		workE = "07000000022b580ca96146e9c85fa1ee2ec02e0e2579af4e3881fc619e" +
+			"c52d64d83e0000bd646e312ff574bc90e08ed91f1d99a85b318cb4464f2a24" +
+			"f9ad2bf3b9881c2bc9c344adde75e89b14b627acce606e6d652915bdb71dcf" +
+			"5351e8ad6128faab9e010000000000000000000000000000003e133920204e" +
+			"00000000000029000000a6030000954cee5d00000000000000000000000000" +
+			"00000000000000000000000000000000000000000000000013000000000000" +
+			"000000000000000000000000"
+		workENonce       = "04000000"
+		workEExtraNonce1 = "2e00fcd0"
+		workEExtraNonce2 = "c2ebbe69"
+	)
+
 	job := NewJob(workE, 41)
 	err = client.cfg.db.persistJob(job)
 	if err != nil {
 		t.Fatalf("failed to persist job %v", err)
 	}
+	client.extraNonce1 = workEExtraNonce1
 
 	blockVersion := workE[:8]
 	prevBlock := workE[8:72]
@@ -550,7 +550,8 @@ func testClientMessageHandling(t *testing.T) {
 		return false
 	}
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "954cee5d", "6ddf0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workEExtraNonce2, nTime,
+		workEExtraNonce2)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -581,22 +582,31 @@ func testClientMessageHandling(t *testing.T) {
 		return true
 	}
 
-	// Ensure a CPU client receives an error response when
-	// submitting work referencing a non-existent job.
-	const workE2 = "07000000e2bb3110848ec197118e8df2a3bc85dcaf5a787008a9c7072" +
-		"109dfb25e0a000047fe98e377430404709f8045ebf14b3a1903237c2adb49ed55724" +
-		"12eb2e0ca3c8ad3ffc23e946e1cce2dca67e2f711a78f41003358630b79231f0af33" +
-		"11bd73c010000000000000000000a000000000064ad2620204e0000000000002e000" +
-		"0003b0f000005ec705e0000000000000000000000000000000000000000000000000" +
-		"00000000000000000000000000000008000000100000000000005a0"
+	// Ensure a CPU client receives an error response when submitting work
+	// referencing a non-existent job.
+	const (
+		workE2 = "07000000e2bb3110848ec197118e8df2a3bc85dcaf5a787008a9c707210" +
+			"9dfb25e0a000047fe98e377430404709f8045ebf14b3a1903237c2adb49ed557" +
+			"2412eb2e0ca3c8ad3ffc23e946e1cce2dca67e2f711a78f41003358630b79231" +
+			"f0af3311bd73c010000000000000000000a000000000064ad2620204e0000000" +
+			"000002e0000003b0f000005ec705e00000000000000000000000000000000000" +
+			"0000000000000000000000000000000000000000000000000000000000000000" +
+			"00000"
+		workE2Nonce       = "13000000"
+		workE2ExtraNonce1 = "b072e5dc"
+		workE2ExtraNonce2 = "a9467db0"
+	)
 	job = NewJob(workE2, 46)
 	err = client.cfg.db.persistJob(job)
 	if err != nil {
 		t.Fatalf("failed to persist job %v", err)
 	}
-	client.extraNonce1 = "b072e5dc"
+	client.extraNonce1 = workE2ExtraNonce1
+	nTime = workE2[172:180]
+
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", "notajob", "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", "notajob", workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -640,7 +650,8 @@ func testClientMessageHandling(t *testing.T) {
 		return false, fmt.Errorf("unable to submit work")
 	}
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -676,7 +687,8 @@ func testClientMessageHandling(t *testing.T) {
 	// Ensure a CPU client receives a non-error response when
 	// submitting valid work.
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -707,7 +719,8 @@ func testClientMessageHandling(t *testing.T) {
 	// Ensure a CPU client receives an error response when
 	// submitting duplicate work.
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -742,7 +755,8 @@ func testClientMessageHandling(t *testing.T) {
 	// submitting work intended for a different network.
 	client.cfg.ActiveNet = chaincfg.MainNetParams()
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -774,7 +788,8 @@ func testClientMessageHandling(t *testing.T) {
 	// Ensure a CPU client receives an error response when
 	// submitting work that is rejected by the network.
 	id++
-	sub = SubmitWorkRequest(&id, "tcl", job.UUID, "00000000", "05ec705e", "116f0200")
+	sub = SubmitWorkRequest(&id, "tcl", job.UUID, workE2ExtraNonce2,
+		nTime, workE2Nonce)
 	err = sE.Encode(sub)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -916,8 +931,7 @@ func testClientTimeRolledWork(t *testing.T) {
 	// Ensure a CPU client receives a valid non-error response when
 	// a valid subscribe request is sent.
 	id++
-	cpu, cpuVersion := splitMinerID(cpuID)
-	r = SubscribeRequest(&id, userAgent(cpu, cpuVersion), "")
+	r = SubscribeRequest(&id, cpuUserAgent, "")
 	err = sE.Encode(r)
 	if err != nil {
 		t.Fatalf("[Encode] unexpected error: %v", err)
@@ -1055,12 +1069,12 @@ func testClientUpgrades(t *testing.T) {
 	}
 
 	const minerIdx = 0
-	idPair := newMinerIDPair(cpuID, CPU, clientCPU2)
+	clients := []string{CPU, clientCPU2}
 
 	// Trigger a client upgrade.
 	atomic.StoreInt64(&client.submissions, 50)
 
-	go client.monitor(minerIdx, idPair, cfg.MonitorCycle, cfg.MaxUpgradeTries)
+	go client.monitor(minerIdx, clients, cfg.MonitorCycle, cfg.MaxUpgradeTries)
 	time.Sleep(cfg.MonitorCycle + (cfg.MonitorCycle / 2))
 
 	if fetchMiner(client) != clientCPU2 {
@@ -1088,7 +1102,7 @@ func testClientUpgrades(t *testing.T) {
 
 	atomic.StoreInt64(&client.submissions, 2)
 
-	go client.monitor(minerIdx, idPair, cfg.MonitorCycle, cfg.MaxUpgradeTries)
+	go client.monitor(minerIdx, clients, cfg.MonitorCycle, cfg.MaxUpgradeTries)
 	time.Sleep(cfg.MonitorCycle + (cfg.MonitorCycle / 2))
 
 	if fetchMiner(client) == CPU {

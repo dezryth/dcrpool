@@ -294,9 +294,9 @@ func (c *Client) handleAuthorizeRequest(req *Request, allowed bool) error {
 // monitor periodically checks the miner details set against expected
 // incoming submission tally and upgrades the miner if possible when the
 // submission tallies exceed the expected number by 30 percent.
-func (c *Client) monitor(idx int, pair *minerIDPair, monitorCycle time.Duration, maxTries uint32) {
+func (c *Client) monitor(idx int, clients []string, monitorCycle time.Duration, maxTries uint32) {
 	var subs, tries uint32
-	if len(pair.miners) <= 1 {
+	if len(clients) <= 1 {
 		// Nothing to do if there are no more miner ids to upgrade to.
 		return
 	}
@@ -308,7 +308,7 @@ func (c *Client) monitor(idx int, pair *minerIDPair, monitorCycle time.Duration,
 
 		select {
 		case <-ticker.C:
-			if idx == len(pair.miners)-1 {
+			if idx == len(clients)-1 {
 				// No more miner upgrades possible.
 				return
 			}
@@ -335,7 +335,7 @@ func (c *Client) monitor(idx int, pair *minerIDPair, monitorCycle time.Duration,
 			// Update the miner's details and send a new mining.set_difficulty
 			// message to the client.
 			c.mtx.Lock()
-			miner := pair.miners[idx]
+			miner := clients[idx]
 			newID := fmt.Sprintf("%v/%v", c.extraNonce1, miner)
 			log.Infof("upgrading %s to %s", c.id, newID)
 			info, err := c.cfg.FetchMinerDifficulty(miner)
@@ -375,7 +375,7 @@ func (c *Client) handleSubscribeRequest(req *Request, allowed bool) error {
 		return errs.PoolError(errs.LimitExceeded, err.Error())
 	}
 
-	mid, nid, err := ParseSubscribeRequest(req)
+	userAgent, nid, err := ParseSubscribeRequest(req)
 	if err != nil {
 		sErr := NewStratumError(Unknown, err)
 		resp := SubscribeResponse(*req.ID, "", "", 0, sErr)
@@ -383,8 +383,8 @@ func (c *Client) handleSubscribeRequest(req *Request, allowed bool) error {
 		return err
 	}
 
-	// Identify the miner and fetch needed mining information for it.
-	idPair, err := identifyMiner(mid)
+	// Identify the mining client and fetch needed mining information for it.
+	clients, err := identifyMiningClients(userAgent)
 	if err != nil {
 		sErr := NewStratumError(Unknown, err)
 		resp := SubscribeResponse(*req.ID, "", "", 0, sErr)
@@ -394,7 +394,7 @@ func (c *Client) handleSubscribeRequest(req *Request, allowed bool) error {
 
 	c.mtx.Lock()
 	minerIdx := 0
-	miner := idPair.miners[minerIdx]
+	miner := clients[minerIdx]
 	info, err := c.cfg.FetchMinerDifficulty(miner)
 	if err != nil {
 		c.mtx.Unlock()
@@ -413,7 +413,7 @@ func (c *Client) handleSubscribeRequest(req *Request, allowed bool) error {
 		nid = fmt.Sprintf("mn%v", c.extraNonce1)
 	}
 
-	go c.monitor(minerIdx, idPair, c.cfg.MonitorCycle, c.cfg.MaxUpgradeTries)
+	go c.monitor(minerIdx, clients, c.cfg.MonitorCycle, c.cfg.MaxUpgradeTries)
 
 	var resp *Response
 	switch miner {
@@ -526,7 +526,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		c.sendMessage(resp)
 		return errs.PoolError(errs.LowDifficulty, err.Error())
 	}
-	hash := header.BlockHash()
+	hash := header.PowHashV2()
 	hashTarget := new(big.Rat).SetInt(standalone.HashToBig(&hash))
 	netDiff := new(big.Rat).Quo(powLimit, target)
 	hashDiff := new(big.Rat).Quo(powLimit, hashTarget)
@@ -562,7 +562,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		c.cfg.SignalCache(ClaimedShare)
 	}
 
-	// Only submit work to the network if the submitted blockhash is
+	// Only submit work to the network if the submitted proof of work hash is
 	// less than the network target difficulty.
 	if hashTarget.Cmp(target) > 0 {
 		// Accept the submitted work but note it is not less than the
@@ -583,7 +583,7 @@ func (c *Client) handleSubmitWorkRequest(ctx context.Context, req *Request, allo
 		c.sendMessage(resp)
 		return err
 	}
-	submissionB := make([]byte, getworkDataLen)
+	submissionB := make([]byte, getworkDataLenBlake3)
 	copy(submissionB[:wire.MaxBlockHeaderPayload], headerB)
 	submission := hex.EncodeToString(submissionB)
 	accepted, err := c.cfg.SubmitWork(ctx, submission)
@@ -1056,7 +1056,7 @@ func (c *Client) send() {
 					c.mtx.RUnlock()
 
 					switch miner {
-					case CPU, NiceHashValidator:
+					case CPU, Gominer, NiceHashValidator:
 						c.sendWorkDefault(req, miner)
 						log.Tracef("%s notified of new work", id)
 
