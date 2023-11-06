@@ -50,9 +50,9 @@ const (
 	paymentBufferSize = uint32(30)
 )
 
-// TxCreator defines the functionality needed by a transaction creator for the
-// pool.
-type TxCreator interface {
+// txCreator defines the functionality needed by a transaction creator for the
+// pool. Typically a dcrd client but can be stubbed for testing.
+type txCreator interface {
 	// GetTxOut fetches the output referenced by the provided txHash and index.
 	GetTxOut(context.Context, *chainhash.Hash, uint32, int8, bool) (*chainjson.GetTxOutResult, error)
 	// CreateRawTransaction generates a transaction from the provided
@@ -62,9 +62,9 @@ type TxCreator interface {
 	GetBlock(ctx context.Context, blockHash *chainhash.Hash) (*wire.MsgBlock, error)
 }
 
-// TxBroadcaster defines the functionality needed by a transaction broadcaster
-// for the pool.
-type TxBroadcaster interface {
+// txBroadcaster defines the functionality needed by a transaction broadcaster
+// for the pool. Typically a dcrwallet client but can be stubbed for testing.
+type txBroadcaster interface {
 	// SignTransaction signs transaction inputs, unlocking them for use.
 	SignTransaction(context.Context, *walletrpc.SignTransactionRequest, ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error)
 	// PublishTransaction broadcasts the transaction unto the network.
@@ -108,10 +108,10 @@ type PaymentMgrConfig struct {
 	GetBlockConfirmations func(context.Context, *chainhash.Hash) (int64, error)
 	// FetchTxCreator returns a transaction creator that allows coinbase lookups
 	// and payment transaction creation.
-	FetchTxCreator func() TxCreator
+	FetchTxCreator func() txCreator
 	// FetchTxBroadcaster returns a transaction broadcaster that allows signing
 	// and publishing of transactions.
-	FetchTxBroadcaster func() TxBroadcaster
+	FetchTxBroadcaster func() txBroadcaster
 	// CoinbaseConfTimeout is the duration to wait for coinbase confirmations
 	// when generating a payout transaction.
 	CoinbaseConfTimeout time.Duration
@@ -121,9 +121,9 @@ type PaymentMgrConfig struct {
 
 // paymentMsg represents a payment processing signal.
 type paymentMsg struct {
-	CurrentHeight  uint32
-	TreasuryActive bool
-	Done           chan struct{}
+	CurrentHeight uint32
+	CoinbaseIndex uint32
+	Done          chan struct{}
 }
 
 // PaymentMgr handles generating shares and paying out dividends to
@@ -479,7 +479,7 @@ func (pm *PaymentMgr) applyTxFees(inputs []chainjson.TransactionInput, outputs m
 //
 // The context passed to this function must have a corresponding
 // cancellation to allow for a clean shutdown process.
-func (pm *PaymentMgr) confirmCoinbases(ctx context.Context, txB TxBroadcaster, txHashes map[chainhash.Hash]uint32) error {
+func (pm *PaymentMgr) confirmCoinbases(ctx context.Context, txB txBroadcaster, txHashes map[chainhash.Hash]uint32) error {
 	const funcName = "confirmCoinbases"
 	maxSpendableConfs := int32(pm.cfg.ActiveNet.CoinbaseMaturity) + 1
 
@@ -591,18 +591,9 @@ func (pm *PaymentMgr) monitorRescan(ctx context.Context, rescanSource walletrpc.
 
 // generatePayoutTxDetails creates the payout transaction inputs and outputs
 // from the provided payments
-func (pm *PaymentMgr) generatePayoutTxDetails(ctx context.Context, txC TxCreator, feeAddr stdaddr.Address, payments map[string][]*Payment, treasuryActive bool) ([]chainjson.TransactionInput,
+func (pm *PaymentMgr) generatePayoutTxDetails(ctx context.Context, txC txCreator, feeAddr stdaddr.Address, payments map[string][]*Payment, coinbaseIndex uint32) ([]chainjson.TransactionInput,
 	map[chainhash.Hash]uint32, map[string]dcrutil.Amount, dcrutil.Amount, error) {
 	const funcName = "generatePayoutTxDetails"
-
-	// The coinbase output prior to
-	// [DCP0006](https://github.com/decred/dcps/pull/17)
-	// activation is at the third index position and at
-	// the second index position once DCP0006 is activated.
-	coinbaseIndex := uint32(1)
-	if !treasuryActive {
-		coinbaseIndex = 2
-	}
 
 	var tIn, tOut dcrutil.Amount
 	inputs := make([]chainjson.TransactionInput, 0)
@@ -701,7 +692,7 @@ func (pm *PaymentMgr) generatePayoutTxDetails(ctx context.Context, txC TxCreator
 }
 
 // PayDividends pays mature mining rewards to participating accounts.
-func (pm *PaymentMgr) payDividends(ctx context.Context, height uint32, treasuryActive bool) error {
+func (pm *PaymentMgr) payDividends(ctx context.Context, height uint32, coinbaseIndex uint32) error {
 	const funcName = "payDividends"
 	mPmts, err := pm.cfg.db.maturePendingPayments(height)
 	if err != nil {
@@ -805,7 +796,7 @@ func (pm *PaymentMgr) payDividends(ctx context.Context, height uint32, treasuryA
 	feeAddr := pm.cfg.PoolFeeAddrs[pm.prng.Intn(len(pm.cfg.PoolFeeAddrs))]
 
 	inputs, inputTxHashes, outputs, tOut, err :=
-		pm.generatePayoutTxDetails(ctx, txC, feeAddr, pmts, treasuryActive)
+		pm.generatePayoutTxDetails(ctx, txC, feeAddr, pmts, coinbaseIndex)
 	if err != nil {
 		return err
 	}
@@ -947,7 +938,7 @@ func (pm *PaymentMgr) handlePayments(ctx context.Context) {
 
 		case msg := <-pm.paymentCh:
 			if !pm.cfg.SoloPool {
-				err := pm.payDividends(ctx, msg.CurrentHeight, msg.TreasuryActive)
+				err := pm.payDividends(ctx, msg.CurrentHeight, msg.CoinbaseIndex)
 				if err != nil {
 					log.Errorf("unable to process payments: %v", err)
 					close(msg.Done)

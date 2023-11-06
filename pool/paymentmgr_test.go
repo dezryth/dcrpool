@@ -168,11 +168,11 @@ func createPaymentMgr(t *testing.T, paymentMethod string) (*PaymentMgr, context.
 		return -1, nil
 	}
 
-	fetchTxCreator := func() TxCreator {
+	fetchTxCreator := func() txCreator {
 		return nil
 	}
 
-	fetchTxBroadcaster := func() TxBroadcaster {
+	fetchTxBroadcaster := func() txBroadcaster {
 		return nil
 	}
 
@@ -718,7 +718,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	mPmts[zeroSource.Coinbase] = []*Payment{pmtA}
 	pmtB = NewPayment(yID, randSource, amt, height, estMaturity)
 	mPmts[randSource.Coinbase] = []*Payment{pmtB}
-	treasuryActive := true
+	coinbaseIndex := uint32(1)
 
 	// Ensure generating payout tx details returns an error if fetching txOut
 	// information fails.
@@ -728,7 +728,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		},
 	}
 	_, _, _, _, err = mgr.generatePayoutTxDetails(ctx, txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if !errors.Is(err, errs.TxOut) {
 		cancel()
 		t.Fatalf("expected a fetch txOut error, got %v", err)
@@ -748,7 +748,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	}
 
 	_, _, _, _, err = mgr.generatePayoutTxDetails(ctx, txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if !errors.Is(err, errs.Coinbase) {
 		cancel()
 		t.Fatalf("expected a spendable error")
@@ -772,7 +772,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	}
 
 	_, _, _, _, err = mgr.generatePayoutTxDetails(ctx, txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if !errors.Is(err, errs.ValueNotFound) {
 		cancel()
 		t.Fatalf("expected an account not found error")
@@ -793,7 +793,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	}
 
 	_, _, _, _, err = mgr.generatePayoutTxDetails(ctx, txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if !errors.Is(err, errs.CreateTx) {
 		cancel()
 		t.Fatalf("expected an input output mismatch error")
@@ -814,7 +814,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	}
 
 	_, _, _, _, err = mgr.generatePayoutTxDetails(ctx, txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if !errors.Is(err, errs.CreateTx) {
 		cancel()
 		t.Fatalf("expected an unclaimed input value error, got %v", err)
@@ -834,7 +834,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	inputs, inputTxHashes, outputs, _, err := mgr.generatePayoutTxDetails(ctx,
 		txC, poolFeeAddrs,
-		mPmts, treasuryActive)
+		mPmts, coinbaseIndex)
 	if err != nil {
 		cancel()
 		t.Fatalf("unexpected payout tx details error, got %v", err)
@@ -905,7 +905,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payments returns no error if there are no mature
 	// payments to work with.
-	err = mgr.payDividends(ctx, estMaturity-1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity-1, coinbaseIndex)
 	if err != nil {
 		cancel()
 		t.Fatal("expected no error since there are no mature payments")
@@ -913,11 +913,11 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if the tx creator cannot be
 	// fetched.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return nil
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.Disconnected) {
 		cancel()
 		t.Fatalf("expected a nil tx creator error, got %v", err)
@@ -925,14 +925,14 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if pruning orphaned payments
 	// fails.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{}
 	}
 	mgr.cfg.GetBlockConfirmations = func(ctx context.Context, bh *chainhash.Hash) (int64, error) {
 		return -1, fmt.Errorf("unable to confirm blocks")
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if err == nil {
 		cancel()
 		t.Fatalf("expected a prune orphan payments error")
@@ -940,7 +940,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if generating payout tx details
 	// fails.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return nil, fmt.Errorf("unable to fetch txOut")
@@ -950,7 +950,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	mgr.cfg.GetBlockConfirmations = func(ctx context.Context, bh *chainhash.Hash) (int64, error) {
 		return 16, nil
 	}
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return nil, fmt.Errorf("unable to sign transaction")
@@ -961,28 +961,28 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.TxOut) {
 		cancel()
 		t.Fatalf("expected a generate payout tx details error, got %v", err)
 	}
 
 	// Ensure dividend payment returns an error if applying tx fees fails.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{}
 	}
 	mgr.cfg.GetBlockConfirmations = func(ctx context.Context, bh *chainhash.Hash) (int64, error) {
 		return -1, nil
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.TxIn) {
 		cancel()
 		t.Fatalf("expected an apply tx fee error, got %v", err)
 	}
 
 	// Ensure dividend payment returns an error if confirming a coinbase fails.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -998,7 +998,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		return int64(estMaturity) + 1, nil
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if err == nil {
 		cancel()
 		t.Fatalf("expected a coinbase confirmation error, got %v", err)
@@ -1006,7 +1006,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if the payout transaction cannot
 	// be created.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -1027,7 +1027,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	mgr.cfg.CoinbaseConfTimeout = time.Millisecond * 500
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if err == nil {
 		cancel()
 		t.Fatal("expected a create transaction error")
@@ -1035,7 +1035,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if the tx broadcaster cannot be
 	// fetched.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -1053,12 +1053,12 @@ func testPaymentMgrPayment(t *testing.T) {
 	mgr.cfg.GetBlockConfirmations = func(ctx context.Context, bh *chainhash.Hash) (int64, error) {
 		return int64(estMaturity) + 1, nil
 	}
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return nil
 	}
 	mgr.cfg.WalletPass = "123"
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.Disconnected) {
 		cancel()
 		t.Fatalf("expected a fetch tx broadcaster error, got %v", err)
@@ -1066,7 +1066,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if the payout transaction cannot
 	// be signed.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -1081,7 +1081,7 @@ func testPaymentMgrPayment(t *testing.T) {
 			},
 		}
 	}
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return nil, fmt.Errorf("unable to sign transaction")
@@ -1095,7 +1095,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.SignTx) {
 		cancel()
 		t.Fatalf("expected a signing error, got %v", err)
@@ -1111,7 +1111,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		"205f466fc47435c1a177482e527ff0e76f3c2c613940b358e57f0f0d78d5f2" +
 		"ffcb012102d040a4c34ae65a2b87ea8e9df7413e6504e5f27c6bde019a78ee" +
 		"96145b27c517")
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1130,7 +1130,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.PublishTx) {
 		cancel()
 		t.Fatalf("expected a publish error, got %v", err)
@@ -1138,7 +1138,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error if fetching the wallet client
 	// fails.
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1162,14 +1162,14 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	atomic.StoreUint32(&mgr.failedTxConfs, maxTxConfThreshold)
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.Rescan) {
 		cancel()
 		t.Fatalf("expected a rescan error, got %v", err)
 	}
 
 	// Ensure dividend payment returns an error if fetching rescan responses fail.
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1193,7 +1193,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.Rescan) {
 		cancel()
 		t.Fatalf("expected a rescan error, got %v", err)
@@ -1208,7 +1208,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure dividend payment returns an error when there are no tx
 	// confirmation hashes to rescan.
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.TxConf) {
 		cancel()
 		t.Fatalf("expected a no tx conf error, got %v", err)
@@ -1220,7 +1220,7 @@ func testPaymentMgrPayment(t *testing.T) {
 	mgr.mtx.Unlock()
 
 	// Ensure wallet rescan succeeds when it scans through the current height.
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1246,7 +1246,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if !errors.Is(err, errs.PublishTx) {
 		cancel()
 		t.Fatalf("expected a publish error, got %v", err)
@@ -1254,7 +1254,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	// Ensure paying dividend payment succeeds with valid inputs.
 	txHash, _ := hex.DecodeString("013264da8cc53f70022dc2b5654ebefc9ecfed24ea18dfcfc9adca5642d4fe66")
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1282,7 +1282,7 @@ func testPaymentMgrPayment(t *testing.T) {
 		}
 	}
 
-	err = mgr.payDividends(ctx, estMaturity+1, treasuryActive)
+	err = mgr.payDividends(ctx, estMaturity+1, coinbaseIndex)
 	if err != nil {
 		cancel()
 		t.Fatalf("unexpected dividend payment error, got %v", err)
@@ -1453,7 +1453,7 @@ func testPaymentMgrSignals(t *testing.T) {
 		"ffcb012102d040a4c34ae65a2b87ea8e9df7413e6504e5f27c6bde019a78ee" +
 		"96145b27c517")
 	txHash, _ := hex.DecodeString("013264da8cc53f70022dc2b5654ebefc9ecfed24ea18dfcfc9adca5642d4fe66")
-	mgr.cfg.FetchTxBroadcaster = func() TxBroadcaster {
+	mgr.cfg.FetchTxBroadcaster = func() txBroadcaster {
 		return &txBroadcasterImpl{
 			signTransaction: func(ctx context.Context, req *walletrpc.SignTransactionRequest, options ...grpc.CallOption) (*walletrpc.SignTransactionResponse, error) {
 				return &walletrpc.SignTransactionResponse{
@@ -1481,7 +1481,7 @@ func testPaymentMgrSignals(t *testing.T) {
 		}
 	}
 
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -1503,9 +1503,9 @@ func testPaymentMgrSignals(t *testing.T) {
 	// Ensure the payment lifecycle process receives the payment signal and
 	// processes mature payments.
 	msgA := paymentMsg{
-		CurrentHeight:  estMaturity + 1,
-		TreasuryActive: false,
-		Done:           make(chan struct{}),
+		CurrentHeight: estMaturity + 1,
+		CoinbaseIndex: 2,
+		Done:          make(chan struct{}),
 	}
 
 	var wg sync.WaitGroup
@@ -1520,7 +1520,7 @@ func testPaymentMgrSignals(t *testing.T) {
 
 	// Esure the payment lifecycle process cancels the context when an
 	// error is encountered.
-	mgr.cfg.FetchTxCreator = func() TxCreator {
+	mgr.cfg.FetchTxCreator = func() txCreator {
 		return &txCreatorImpl{
 			getTxOut: func(ctx context.Context, txHash *chainhash.Hash, index uint32, tree int8, mempool bool) (*chainjson.GetTxOutResult, error) {
 				return &chainjson.GetTxOutResult{
@@ -1537,9 +1537,9 @@ func testPaymentMgrSignals(t *testing.T) {
 	}
 
 	msgB := paymentMsg{
-		CurrentHeight:  estMaturity + 1,
-		TreasuryActive: false,
-		Done:           make(chan struct{}),
+		CurrentHeight: estMaturity + 1,
+		CoinbaseIndex: 2,
+		Done:          make(chan struct{}),
 	}
 	mgr.processPayments(ctx, &msgB)
 	<-msgB.Done
