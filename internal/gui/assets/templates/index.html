@@ -36,15 +36,19 @@
 <div class="pool-overview pt-4 pb-3 mb-3">
     <div class="container">
 
-        <h1>Mining Pool Overview</h1>
+        <h1>Decred Mining Pool Overview</h1>
 
         <p class="pt-1 pb-2">
-          To mine, point your miner to the pool and set the username as described below in the miner configuration section.
+          Welcome! To mine, point your miner to the pool and set the username as described below in the miner configuration section.
         <br>
           Use the account information button at the top right to view your pending payments and other account info.
+        <br>
+          <span style="color:blueviolet"></span>Truthfully, the pool fees are not enough to cover server hosting costs. Please consider recommending our pool to friends! Good luck!
+        <br>
+        <a href="https://docs.decred.org/mining/overview/" class="pt-1 pb-2">Payments will not be sent until 256 blocks are mined after the block found. This is normal!</a>
         </p>
 
-        <a href="https://docs.decred.org/mining/overview/" class="pt-1 pb-2">Payments will not be sent until until 256 blocks are mined after the block found. This is normal!</a>
+
 
         {{template "pool-stats" .PoolStatsData}}
 
