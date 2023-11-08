@@ -8754,9 +8754,9 @@ table td {
 
 
 .pool-overview {
-  color: #FFA500;
+  color: #FFF;
   background-color: #0d96bb;
-  font-size: 16px;
+  font-size: 14px;
 }
 
 .pool-overview h1 {
@@ -8767,7 +8767,7 @@ table td {
 .pool-overview-stat-title {
   font-size: 14px;
   padding-bottom: 6px;
-  color: #FFFF00;
+  color: black;
 }
 
 .pool-overview-stat-value {

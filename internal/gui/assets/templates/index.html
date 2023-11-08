@@ -33,23 +33,19 @@
     </div>
 </noscript>
 
-<div class="pool-overview pt-4 pb-3 mb-3">
+<div class="pool-overview pt-1 pb-1">
     <div class="container">
 
-        <h1>Decred Mining Pool Overview</h1>
+        <h1>BLAKE3DCR Pool Overview</h1>
 
-        <p class="pt-1 pb-2">
-          Welcome! To mine, point your miner to the pool and set the username as described below in the miner configuration section.
-        <br>
-          Use the account information button at the top right to view your pending payments and other account info.
-        <br>
-          <span style="color:blueviolet">Truthfully, the pool fees are not enough to cover server hosting costs. Please consider recommending our pool to friends! Good luck!</span>
-        <br>
-          <a href="https://docs.decred.org/mining/overview/" class="pt-1 pb-2">Payments will not be sent until 256 blocks are mined after the block found. This is normal!</a>
-        </p>
+          <h2>Welcome and Good Luck!</h2>
 
-
-
+        <ul>
+          <li>To mine, point your miner to the pool and set the username as described below in the miner configuration section.</li>
+          <li>Use the account button at the top right to view pending payments and other account info.</li>
+          <li>Truthfully, the pool fees are not enough to cover server hosting costs. Please consider recommending our pool to friends.</li>
+          <li>Payments will not be sent until <a href="https://docs.decred.org/mining/overview/">256 blocks</a> are mined after the block found. This is normal!</li>
+        </ul>
         {{template "pool-stats" .PoolStatsData}}
 
     </div>
@@ -76,7 +72,7 @@
                             <li>Follow directions to build from source code. Help can be found <a href="https://chat.decred.org/#/room/#pow-mining:decred.org">here.</a></li>
 
                             <li>Run gominer.exe with the following command within its directory like below:
-                            </br>
+                            <br>
                               <code><font size="1">gominer.exe --pool stratum+tcp://{{.Address}}:{{.MinerPort}} --pooluser MININGREWARDSADDRESS.UNIQUENAMEOFYOURCHOICE</font></code>
                             </li>
 
