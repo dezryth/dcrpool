@@ -252,6 +252,9 @@ func (c *Cache) getRewardQuotas(first, last int) (int, []*rewardQuota, error) {
 func (c *Cache) getPoolHash() string {
 	c.poolHashMtx.RLock()
 	defer c.poolHashMtx.RUnlock()
+	if c.poolHash == "0 H/s" {
+		return "???"
+	}
 	return c.poolHash
 }
 
