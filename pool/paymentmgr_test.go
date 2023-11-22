@@ -184,7 +184,7 @@ func createPaymentMgr(t *testing.T, paymentMethod string) (*PaymentMgr, context.
 	pCfg := &PaymentMgrConfig{
 		db:                    db,
 		ActiveNet:             activeNet,
-		PoolFee:               0.1,
+		PoolFee:               0.05,
 		LastNPeriod:           time.Second * 120,
 		SoloPool:              false,
 		PaymentMethod:         paymentMethod,
@@ -213,7 +213,9 @@ func testPaymentMgrPPS(t *testing.T) {
 	sixtyBefore := now.Add(-(time.Second * 60)).UnixNano()
 	thirtyBefore := now.Add(-(time.Second * 30)).UnixNano()
 	shareCount := 10
-	coinbaseValue := 80
+	// Realistic mainnet coinbase value as of DCP-12 activation.
+	coinbaseValue := 8388322 // 0.08388322 DCR
+	coinbase := dcrutil.Amount(coinbaseValue)
 	height := uint32(20)
 	weight := new(big.Rat).SetFloat64(1.0)
 
@@ -227,11 +229,6 @@ func testPaymentMgrPPS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-
-	coinbase, err := dcrutil.NewAmount(float64(coinbaseValue))
-	if err != nil {
-		t.Fatal(err)
 	}
 
 	// Ensure the last payment created on time was updated.
@@ -306,7 +303,9 @@ func testPaymentMgrPPLNS(t *testing.T) {
 	now := time.Now()
 	prng := mrand.New(mrand.NewSource(now.UnixNano()))
 	shareCount := 5
-	coinbaseValue := 60
+	// Realistic mainnet coinbase value as of DCP-12 activation.
+	coinbaseValue := 8388322 // 0.08388322 DCR
+	coinbase := dcrutil.Amount(coinbaseValue)
 	sixtyBefore := now.Add(-(time.Second * 60)).UnixNano()
 	thirtyBefore := now.Add(-(time.Second * 30)).UnixNano()
 	height := uint32(20)
@@ -322,11 +321,6 @@ func testPaymentMgrPPLNS(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-	}
-
-	coinbase, err := dcrutil.NewAmount(float64(coinbaseValue))
-	if err != nil {
-		t.Fatalf("[NewAmount] unexpected error: %v", err)
 	}
 
 	// Ensure the last payment created on time was updated.
@@ -400,7 +394,9 @@ func testPaymentMgrMaturity(t *testing.T) {
 	now := time.Now()
 	prng := mrand.New(mrand.NewSource(now.UnixNano()))
 	shareCount := 3
-	coinbaseValue := 60
+	// Realistic mainnet coinbase value as of DCP-12 activation.
+	coinbaseValue := 8388322 // 0.08388322 DCR
+	coinbase := dcrutil.Amount(coinbaseValue)
 	thirtyBefore := now.Add(-(time.Second * 30)).UnixNano()
 	height := uint32(20)
 	weight := new(big.Rat).SetFloat64(1.0)
@@ -423,12 +419,7 @@ func testPaymentMgrMaturity(t *testing.T) {
 		}
 	}
 
-	coinbase, err := dcrutil.NewAmount(float64(coinbaseValue))
-	if err != nil {
-		t.Fatalf("[NewAmount] unexpected error: %v", err)
-	}
-
-	err = mgr.generatePayments(height, zeroSource, coinbase, now.UnixNano())
+	err := mgr.generatePayments(height, zeroSource, coinbase, now.UnixNano())
 	if err != nil {
 		t.Fatalf("unable to generate payments: %v", err)
 	}
@@ -472,6 +463,177 @@ func testPaymentMgrMaturity(t *testing.T) {
 	if ft != expectedFeeAmt {
 		t.Fatalf("expected pool fee payment total to have %v, got %v",
 			expectedFeeAmt, ft)
+	}
+}
+
+func testPaymentMgrApplyTxFees(t *testing.T) {
+	mgr, _, _ := createPaymentMgr(t, PPS)
+	feeAddr := poolFeeAddrs.String()
+
+	tests := map[string]struct {
+		// inputs and outputs are the params which are passed into applyTxFees.
+		inputs  []dcrutil.Amount
+		outputs map[string]dcrutil.Amount
+		// expectedOutputs are the output amounts which are expected after
+		// applyTxFees has been run. Note that the fee output should remain
+		// unchanged - tx fees are only deducted from user outputs.
+		expectedOutputs map[string]dcrutil.Amount
+	}{
+		"Single input, single output": {
+			inputs: []dcrutil.Amount{
+				dcrutil.Amount(900000000),
+			},
+			outputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(800000000),
+			},
+			expectedOutputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(799997250),
+			},
+		},
+		"Single input, multiple outputs": {
+			inputs: []dcrutil.Amount{
+				dcrutil.Amount(500000000),
+			},
+			outputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(50000000),
+				"user1": dcrutil.Amount(300000000),
+				"user2": dcrutil.Amount(150000000),
+			},
+			expectedOutputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(50000000),
+				"user1": dcrutil.Amount(299997854),
+				"user2": dcrutil.Amount(149998927),
+			},
+		},
+		"Multiple inputs, single output": {
+			inputs: []dcrutil.Amount{
+				dcrutil.Amount(500000000),
+				dcrutil.Amount(300000000),
+				dcrutil.Amount(200000000),
+			},
+			outputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(900000000),
+			},
+			expectedOutputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(899993930),
+			},
+		},
+		"Multiple inputs, multiple outputs": {
+			inputs: []dcrutil.Amount{
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+				dcrutil.Amount(100000000),
+			},
+			outputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(100000000),
+				"user2": dcrutil.Amount(100000000),
+				"user3": dcrutil.Amount(100000000),
+				"user4": dcrutil.Amount(100000000),
+				"user5": dcrutil.Amount(100000000),
+				"user6": dcrutil.Amount(500000000),
+			},
+			expectedOutputs: map[string]dcrutil.Amount{
+				feeAddr: dcrutil.Amount(100000000),
+				"user1": dcrutil.Amount(99997830),
+				"user2": dcrutil.Amount(99997830),
+				"user3": dcrutil.Amount(99997830),
+				"user4": dcrutil.Amount(99997830),
+				"user5": dcrutil.Amount(99997830),
+				"user6": dcrutil.Amount(499989150),
+			},
+		},
+	}
+
+	for testName, test := range tests {
+		t.Run(testName, func(t *testing.T) {
+			// Create TransactionInputs from the provided input amounts.
+			txInputs := make([]chainjson.TransactionInput, len(test.inputs))
+			for i := 0; i < len(test.inputs); i++ {
+				txInputs[i] = chainjson.TransactionInput{
+					Amount: float64(test.inputs[i]),
+					Txid:   chainhash.Hash{1}.String(),
+					Vout:   2,
+					Tree:   wire.TxTreeRegular,
+				}
+			}
+
+			// Call applyTxFees.
+			_, err := mgr.applyTxFees(txInputs, test.outputs, poolFeeAddrs)
+			if err != nil {
+				t.Fatalf("unexpected applyTxFees error: %v", err)
+			}
+
+			// Validate outputs have been modified as expected.
+			for addr, amt := range test.outputs {
+				// If the fee could not be split without rounding, extra atoms
+				// will be allocated to random outputs.
+				wantAmt1 := test.expectedOutputs[addr]
+				wantAmt2 := wantAmt1 - 1
+				if amt != wantAmt1 && amt != wantAmt2 {
+					t.Fatalf("expected payment for %s to be %v or %v, got %v",
+						addr, wantAmt1, wantAmt2, amt)
+				}
+			}
+
+			// Ensure the fee deduced from outputs matches expectation.
+			expectedFee := estimateTxFee(len(test.inputs), len(test.outputs))
+			actualFee := func() dcrutil.Amount {
+				var tIn dcrutil.Amount
+				for _, amt := range test.inputs {
+					tIn += amt
+				}
+				var tOut dcrutil.Amount
+				for _, amt := range test.outputs {
+					tOut += amt
+				}
+				return tIn - tOut
+			}()
+
+			if actualFee != expectedFee {
+				t.Fatalf("expected total fee to be %v, got %v",
+					expectedFee, actualFee)
+			}
+		})
+	}
+}
+
+// testPaymentMgrApplyTxFeesErrs ensures applyTxFees returns an error if it is
+// passed invalid parameters.
+func testPaymentMgrApplyTxFeesErrs(t *testing.T) {
+	mgr, _, _ := createPaymentMgr(t, PPS)
+
+	in := chainjson.TransactionInput{
+		Amount: 100,
+		Txid:   chainhash.Hash{1}.String(),
+		Vout:   2,
+		Tree:   wire.TxTreeRegular,
+	}
+
+	// Ensure providing no tx inputs triggers an error.
+	_, err := mgr.applyTxFees([]chainjson.TransactionInput{},
+		make(map[string]dcrutil.Amount), poolFeeAddrs)
+	if !errors.Is(err, errs.TxIn) {
+		t.Fatalf("expected a tx input error, got %v", err)
+	}
+
+	// Ensure providing no tx outputs triggers an error.
+	_, err = mgr.applyTxFees([]chainjson.TransactionInput{in},
+		make(map[string]dcrutil.Amount), poolFeeAddrs)
+	if !errors.Is(err, errs.TxOut) {
+		t.Fatalf("expected a tx output error, got %v", err)
 	}
 }
 
@@ -559,62 +721,6 @@ func testPaymentMgrPayment(t *testing.T) {
 		cancel()
 		t.Fatalf("expected a single valid mature payment after "+
 			"pruning, got %v", len(pmtSet))
-	}
-
-	// applyTxFee tests.
-	outV, _ := dcrutil.NewAmount(100)
-	in := chainjson.TransactionInput{
-		Amount: float64(outV),
-		Txid:   chainhash.Hash{1}.String(),
-		Vout:   2,
-		Tree:   wire.TxTreeRegular,
-	}
-
-	poolFeeValue := amt.MulF64(0.1)
-	xValue := amt.MulF64(0.6)
-	yValue := amt.MulF64(0.3)
-
-	feeAddr := poolFeeAddrs.String()
-	out := make(map[string]dcrutil.Amount)
-	out[xAddr] = xValue
-	out[yAddr] = yValue
-	out[feeAddr] = poolFeeValue
-
-	_, txFee, err := mgr.applyTxFees([]chainjson.TransactionInput{in},
-		out, outV, poolFeeAddrs)
-	if err != nil {
-		t.Fatalf("unexpected applyTxFees error: %v", err)
-	}
-
-	// Ensure the pool fee payment was exempted from tx fee deductions.
-	if out[feeAddr] != poolFeeValue {
-		t.Fatalf("expected pool fee payment to be %v, got %v",
-			poolFeeValue, out[feeAddr])
-	}
-
-	// Ensure the difference between initial account payments and updated
-	// account payments plus the transaction fee is not more than the
-	// maximum rounding difference.
-	initialAccountPayments := xValue + yValue
-	updatedAccountPaymentsPlusTxFee := out[xAddr] + out[yAddr] + txFee
-	if initialAccountPayments-updatedAccountPaymentsPlusTxFee <= maxRoundingDiff {
-		t.Fatalf("initial account payment total %v to be equal to updated "+
-			"values plus the transaction fee %v", initialAccountPayments,
-			updatedAccountPaymentsPlusTxFee)
-	}
-
-	// Ensure providing no tx inputs triggers an error.
-	_, _, err = mgr.applyTxFees([]chainjson.TransactionInput{},
-		out, outV, poolFeeAddrs)
-	if !errors.Is(err, errs.TxIn) {
-		t.Fatalf("expected a tx input error, got %v", err)
-	}
-
-	// Ensure providing no tx outputs triggers an error.
-	_, _, err = mgr.applyTxFees([]chainjson.TransactionInput{in},
-		make(map[string]dcrutil.Amount), outV, poolFeeAddrs)
-	if !errors.Is(err, errs.TxOut) {
-		t.Fatalf("expected a tx output error, got %v", err)
 	}
 
 	// confirmCoinbases tests.
@@ -875,7 +981,7 @@ func testPaymentMgrPayment(t *testing.T) {
 
 	for addr := range outputs {
 		var match bool
-		if addr == feeAddr || addr == xAddr || addr == yAddr {
+		if addr == poolFeeAddrs.String() || addr == xAddr || addr == yAddr {
 			match = true
 		}
 		if !match {
@@ -1308,15 +1414,17 @@ func testPaymentMgrPayment(t *testing.T) {
 	}
 }
 
+// testPaymentMgrDust ensures dust payments are forfeited by their originating
+// accounts and added to the pool fee payout.
 func testPaymentMgrDust(t *testing.T) {
 	mgr, _, _ := createPaymentMgr(t, PPLNS)
 	height := uint32(20)
 
-	// Ensure dust payments are forfeited by their originating accounts and
-	// added to the pool fee payout.
 	now := time.Now()
 	prng := mrand.New(mrand.NewSource(now.UnixNano()))
-	coinbaseValue := 1
+	// Realistic mainnet coinbase value as of DCP-12 activation.
+	coinbaseValue := 8388322 // 0.08388322 DCR
+	coinbase := dcrutil.Amount(coinbaseValue)
 	mul := 100000
 	weight := new(big.Rat).SetFloat64(1.0)
 	yWeight := new(big.Rat).Mul(weight, new(big.Rat).SetInt64(int64(mul)))
@@ -1329,11 +1437,6 @@ func testPaymentMgrDust(t *testing.T) {
 	err = persistShare(db, yID, yWeight, now.UnixNano(), prng.Uint64())
 	if err != nil {
 		t.Fatal(err)
-	}
-
-	coinbase, err := dcrutil.NewAmount(float64(coinbaseValue))
-	if err != nil {
-		t.Fatalf("[NewAmount] unexpected error: %v", err)
 	}
 
 	// Ensure the expected payout amount for account x is dust.
@@ -1378,11 +1481,12 @@ func testPaymentMgrDust(t *testing.T) {
 		t.Fatalf("expected no payment amounts for account x, got %v", xt)
 	}
 
-	// Ensure the updated pool fee includes the dust amount from account x.
-	expectedFeeAmt := coinbase.MulF64(mgr.cfg.PoolFee)
-	if ft-maxRoundingDiff < expectedFeeAmt {
-		t.Fatalf("expected the updated pool fee (%v) to be greater "+
-			"than the initial (%v)", ft, expectedFeeAmt)
+	// Ensure the entire coinbase is paid to fees and y. Add an extra sat for
+	// rounding error.
+	totalPayment := yt + ft + dcrutil.Amount(1)
+	if totalPayment != coinbase {
+		t.Fatalf("incorrect total payment amount, expected %v, got %v",
+			coinbase, totalPayment)
 	}
 }
 

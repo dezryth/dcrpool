@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"math/rand"
 	"sync"
@@ -264,7 +265,7 @@ func (pm *PaymentMgr) calculatePayments(ratios map[string]*big.Rat, source *Paym
 	amtSansFees := total - fee
 	sansFees := new(big.Rat).SetInt64(int64(amtSansFees))
 	paymentTotal := dcrutil.Amount(0)
-	dustAmts := make([]dcrutil.Amount, 0)
+	var dustTotal dcrutil.Amount
 
 	// Calculate each participating account's portion of the amount after fees.
 	payments := make([]*Payment, 0)
@@ -291,7 +292,7 @@ func (pm *PaymentMgr) calculatePayments(ratios map[string]*big.Rat, source *Paym
 			// forfeited by their corresponding accounts and be added to
 			// the pool fee payout. This is intended to serve as a deterrent
 			// for contributing intermittent, sporadic work to the pool.
-			dustAmts = append(dustAmts, amt)
+			dustTotal += amt
 		} else {
 			payments = append(payments, NewPayment(account, source, amt, height,
 				estMaturity))
@@ -308,11 +309,6 @@ func (pm *PaymentMgr) calculatePayments(ratios map[string]*big.Rat, source *Paym
 
 	// Add a payout entry for pool fees, which includes any dust payments
 	// collected.
-	var dustTotal dcrutil.Amount
-	for _, amt := range dustAmts {
-		dustTotal += amt
-	}
-
 	feePayment := NewPayment(PoolFeesK, source, fee+dustTotal, height, estMaturity)
 	payments = append(payments, feePayment)
 
@@ -419,6 +415,21 @@ func (pm *PaymentMgr) pruneOrphanedPayments(ctx context.Context, pmts map[string
 	return pmts, nil
 }
 
+func estimateTxFee(numInputs, numOutputs int) dcrutil.Amount {
+	inSizes := make([]int, numInputs)
+	for i := 0; i < numInputs; i++ {
+		inSizes[i] = txsizes.RedeemP2PKHSigScriptSize
+	}
+	outSizes := make([]int, numOutputs)
+	for i := 0; i < numOutputs; i++ {
+		outSizes[i] = txsizes.P2PKHOutputSize
+	}
+	const changeScriptSize = 0
+	estSize := txsizes.EstimateSerializeSizeFromScriptSizes(inSizes, outSizes,
+		changeScriptSize)
+	return txrules.FeeForSerializeSize(txrules.DefaultRelayFeePerKb, estSize)
+}
+
 // applyTxFees determines the transaction fees needed for the payout transaction
 // and deducts portions of the fee from outputs of participating accounts
 // being paid to.
@@ -427,44 +438,62 @@ func (pm *PaymentMgr) pruneOrphanedPayments(ctx context.Context, pmts map[string
 // the ratio of the amount being paid to the total transaction output minus
 // pool fees.
 func (pm *PaymentMgr) applyTxFees(inputs []chainjson.TransactionInput, outputs map[string]dcrutil.Amount,
-	tOut dcrutil.Amount, feeAddr stdaddr.Address) (dcrutil.Amount, dcrutil.Amount, error) {
+	feeAddr stdaddr.Address) (dcrutil.Amount, error) {
 	const funcName = "applyTxFees"
 	if len(inputs) == 0 {
 		desc := fmt.Sprintf("%s: cannot create a payout transaction "+
 			"without a tx input", funcName)
-		return 0, 0, errs.PoolError(errs.TxIn, desc)
+		return 0, errs.PoolError(errs.TxIn, desc)
 	}
 	if len(outputs) == 0 {
 		desc := fmt.Sprintf("%s: cannot create a payout transaction "+
 			"without a tx output", funcName)
-		return 0, 0, errs.PoolError(errs.TxOut, desc)
+		return 0, errs.PoolError(errs.TxOut, desc)
 	}
-	inSizes := make([]int, len(inputs))
-	for range inputs {
-		inSizes = append(inSizes, txsizes.RedeemP2PKHSigScriptSize)
-	}
-	outSizes := make([]int, len(outputs))
-	for range outputs {
-		outSizes = append(outSizes, txsizes.P2PKHOutputSize)
-	}
-	changeScriptSize := 0
-	estSize := txsizes.EstimateSerializeSizeFromScriptSizes(inSizes, outSizes,
-		changeScriptSize)
-	estFee := txrules.FeeForSerializeSize(txrules.DefaultRelayFeePerKb, estSize)
-	sansFees := tOut - estFee
 
+	estTxFee := estimateTxFee(len(inputs), len(outputs))
+
+	// Determine the total output amount without the pool fee.
+	var outputAmountSansPoolFee dcrutil.Amount
+	for addr, v := range outputs {
+		if addr == feeAddr.String() {
+			continue
+		}
+		outputAmountSansPoolFee += v
+	}
+
+	// Determine the proportional transaction fees for each output other than
+	// the pool fee.  Note that in order to avoid overpayment of the fee, each
+	// proportional fee is calculated via a floor.  This means there will still
+	// be a few atoms leftover to account for when the fee is not evenly
+	// divisible by the number of outputs.
+	var txFeesPaid dcrutil.Amount
+	proportionalTxFees := make(map[string]dcrutil.Amount)
 	for addr, v := range outputs {
 		// Pool fee payments are excluded from tx fee deductions.
 		if addr == feeAddr.String() {
 			continue
 		}
 
-		ratio := float64(int64(sansFees)) / float64(int64(v))
-		outFee := estFee.MulF64(ratio)
-		outputs[addr] -= outFee
+		ratio := float64(v) / float64(outputAmountSansPoolFee)
+		outFee := dcrutil.Amount(math.Floor(float64(estTxFee) * ratio))
+		proportionalTxFees[addr] = outFee
+		txFeesPaid += outFee
 	}
 
-	return sansFees, estFee, nil
+	// Apply the fees to the outputs while accounting for any extra atoms needed
+	// to reach the required transaction fee by reducing random outputs
+	// accordingly.
+	remainingTxFeeAtoms := estTxFee - txFeesPaid
+	for addr, fee := range proportionalTxFees {
+		outputs[addr] -= fee
+		if remainingTxFeeAtoms > 0 {
+			outputs[addr]--
+			remainingTxFeeAtoms--
+		}
+	}
+
+	return estTxFee, nil
 }
 
 // confirmCoinbases ensures the coinbases referenced by the provided
@@ -800,7 +829,7 @@ func (pm *PaymentMgr) payDividends(ctx context.Context, height uint32, coinbaseI
 		return err
 	}
 
-	_, estFee, err := pm.applyTxFees(inputs, outputs, tOut, feeAddr)
+	estFee, err := pm.applyTxFees(inputs, outputs, feeAddr)
 	if err != nil {
 		return err
 	}
